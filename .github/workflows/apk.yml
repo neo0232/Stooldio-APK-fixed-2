@@ -1,0 +1,82 @@
+name: Compilar APK Stooldio Beta
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Buscar el HTML de Stooldio (el zip de versión más alta)
+        run: |
+          shopt -s nullglob globstar
+          Z=$(printf '%s\n' *.zip **/*.zip | grep -v '^app/' | sort -uV | tail -1)
+          F=""
+          if [ -n "$Z" ]; then
+            echo "Zips en el repo:"; printf '%s\n' *.zip **/*.zip | sort -uV
+            echo ">>> Usando el zip más nuevo: $Z"
+            rm -rf _zip && unzip -o -q "$Z" -d _zip
+            for c in _zip/**/index.html _zip/**/Stooldio.html; do if [ -f "$c" ]; then F="$c"; break; fi; done
+          fi
+          if [ -z "$F" ]; then for c in index.html Stooldio.html **/index.html **/Stooldio.html; do if [ -f "$c" ] && [[ "$c" != app/* ]] && [[ "$c" != _zip/* ]]; then F="$c"; break; fi; done; fi
+          if [ -z "$F" ]; then echo "::error::No encontré index.html ni Stooldio.html en el repositorio"; ls -R | head -50; exit 1; fi
+          echo ">>> HTML usado: $F ($(du -h "$F" | cut -f1))"
+          md5sum "$F"
+          grep -q 'stooldio-apk-1.3.9' "$F" && echo ">>> Es la versión 1.3.9 (OD en mallas)" || echo "::warning::Este HTML es anterior a la 1.3.9"
+          mkdir -p app/www && cp "$F" app/www/index.html
+
+      - name: Crear proyecto Android (Capacitor 6 + guardar/compartir)
+        working-directory: app
+        run: |
+          echo '{"name":"stooldio-beta","version":"1.3.9","private":true}' > package.json
+          npm i --no-audit --no-fund @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/filesystem@6 @capacitor/share@6
+          echo '{"appId":"com.precicut.stooldiobeta","appName":"Stooldio Beta","webDir":"www","android":{"allowMixedContent":true}}' > capacitor.config.json
+          npx cap add android
+          npx cap sync android
+
+      - name: Permisos de cámara y archivos
+        working-directory: app/android/app/src/main
+        run: |
+          python3 - <<'PY'
+          p='AndroidManifest.xml'
+          s=open(p).read()
+          extra='''    <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+              <uses-feature android:name="android.hardware.camera" android:required="false" />
+              <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
+          '''
+          if 'android.permission.CAMERA' not in s:
+              s=s.replace('<application','\n'+extra+'\n    <application',1)
+          s=s.replace('<application','<application android:requestLegacyExternalStorage="true"',1) if 'requestLegacyExternalStorage' not in s else s
+          open(p,'w').write(s)
+          PY
+          grep -n "permission\|feature\|<application" AndroidManifest.xml
+
+      - name: Compilar APK (SDK de Android que ya trae el servidor)
+        working-directory: app/android
+        run: |
+          echo "SDK: $ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Stooldio-Beta-APK
+          path: app/android/app/build/outputs/apk/debug/app-debug.apk
