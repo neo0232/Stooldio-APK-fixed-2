@@ -34,13 +34,13 @@ jobs:
           if [ -z "$F" ]; then echo "::error::No encontré index.html ni Stooldio.html en el repositorio"; ls -R | head -50; exit 1; fi
           echo ">>> HTML usado: $F ($(du -h "$F" | cut -f1))"
           md5sum "$F"
-          grep -q 'stooldio-apk-1.3.9' "$F" && echo ">>> Es la versión 1.3.9 (OD en mallas)" || echo "::warning::Este HTML es anterior a la 1.3.9"
+          grep -q 'stooldio-apk-1.6.0' "$F" && echo ">>> Es la versión 1.6.0 (Hoja de dibujo + motion kit)" || echo "::warning::Este HTML es anterior a la 1.6.0"
           mkdir -p app/www && cp "$F" app/www/index.html
 
       - name: Crear proyecto Android (Capacitor 6 + guardar/compartir)
         working-directory: app
         run: |
-          echo '{"name":"stooldio-beta","version":"1.3.9","private":true}' > package.json
+          echo '{"name":"stooldio-beta","version":"1.6.0","private":true}' > package.json
           npm i --no-audit --no-fund @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/filesystem@6 @capacitor/share@6
           echo '{"appId":"com.precicut.stooldiobeta","appName":"Stooldio Beta","webDir":"www","android":{"allowMixedContent":true}}' > capacitor.config.json
           npx cap add android
